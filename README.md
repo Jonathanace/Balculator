@@ -1,0 +1,2 @@
+# Balculator
+The balatro calculator
