@@ -1,0 +1,5 @@
+Gymasium/
+game/game_files/*
+!game/game_files/server_thread.lua
+scratch/
+test/
