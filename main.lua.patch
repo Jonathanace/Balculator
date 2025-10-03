@@ -1,0 +1,205 @@
+--- test/main.lua	2025-02-21 10:11:29.536228000 -0800
++++ game/game_files/main.lua	2025-10-02 18:56:35.610717600 -0700
+@@ -1,5 +1,7 @@
+ if (love.system.getOS() == 'OS X' ) and (jit.arch == 'arm64' or jit.arch == 'arm') then jit.off() end
+ require "engine/object"
++if (love.system.getOS() == 'OS X' ) and (jit.arch == 'arm64' or jit.arch == 'arm') then jit.off() end
++require "engine/object"
+ require "bit"
+ require "engine/string_packer"
+ require "engine/controller"
+@@ -30,6 +32,51 @@
+ 
+ math.randomseed( G.SEED )
+ 
++-- Redirect 'print' to capture output
++local original_print = print
++G.DEBUG_LOG = {} -- Initialize a log table in your global
++
++function print(...)
++    local message = table.concat({...}, "\t") -- Join all print arguments
++    table.insert(G.DEBUG_LOG, message)
++
++    -- Keep the log from growing infinitely
++    if #G.DEBUG_LOG > 15 then
++        table.remove(G.DEBUG_LOG, 1) 
++    end
++
++    original_print(message) -- Still print to the console/terminal
++end
++
++print("--- LOGGING SYSTEM INITIALIZED ---") 
++local socket = require("socket")
++print(socket._VERSION)
++
++
++function love.draw()
++    -- Perf monitoring checkpoint
++    timer_checkpoint(nil, 'draw', true)
++    
++    -- Draw the main game content
++    G:draw()
++
++-- === DEBUG DRAWING ===
++if G.F_VERBOSE then 
++    -- Use the font variable that was just created in love.load
++    local debug_font = G.FONTS.m6x11_20 or love.graphics.getFont() 
++    
++    love.graphics.setFont(debug_font) 
++    love.graphics.setColor(1, 1, 1, 1)
++
++    local y_pos = 10 
++    for i, line in ipairs(G.DEBUG_LOG) do
++        love.graphics.print(line, 10, y_pos)
++        y_pos = y_pos + 20
++    end
++end
++-- =====================
++end
++
+ function love.run()
+ 	if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
+ 
+@@ -83,56 +130,105 @@
+ 	end
+ end
+ 
+-function love.load() 
+-	G:start_up()
+-	--Steam integration
+-	local os = love.system.getOS()
+-	if os == 'OS X' or os == 'Windows' then 
+-		local st = nil
+-		--To control when steam communication happens, make sure to send updates to steam as little as possible
+-		if os == 'OS X' then
+-			local dir = love.filesystem.getSourceBaseDirectory()
+-			local old_cpath = package.cpath
+-			package.cpath = package.cpath .. ';' .. dir .. '/?.so'
+-			st = require 'luasteam'
+-			package.cpath = old_cpath
+-		else
+-			st = require 'luasteam'
+-		end
+-
+-		st.send_control = {
+-			last_sent_time = -200,
+-			last_sent_stage = -1,
+-			force = false,
+-		}
+-		if not (st.init and st:init()) then
+-			love.event.quit()
+-		end
+-		--Set up the render window and the stage for the splash screen, then enter the gameloop with :update
+-		G.STEAM = st
+-	else
+-	end
++function love.load()
++    G:start_up()
++    --Steam integration
++    local os = love.system.getOS()
++    if os == 'OS X' or os == 'Windows' then
++        local st = nil
++        --To control when steam communication happens, make sure to send updates to steam as little as possible
++        if os == 'OS X' then
++            local dir = love.filesystem.getSourceBaseDirectory()
++            local old_cpath = package.cpath
++            package.cpath = package.cpath .. ';' .. dir .. '/?.so'
++            st = require 'luasteam'
++            package.cpath = old_cpath
++        else
++            st = require 'luasteam'
++        end
++        print("love.load() finished. Game is starting up.")
++
++        st.send_control = {
++            last_sent_time = -200,
++            last_sent_stage = -1,
++            force = false,
++        }
++        if not (st.init and st:init()) then
++            love.event.quit()
++        end
++        --Set up the render window and the stage for the splash screen, then enter the gameloop with :update
++        G.STEAM = st
++    else
++
++    end
++
++    -- === FINALIZED SERVER STARTUP LOGIC ===
++    local CRASH_CHANNEL_NAME = "server_crash_report"
++
++    G.SERVER_THREAD = love.thread.newThread("server_thread.lua")
++    G.SERVER_THREAD:start()
++
++    local crash_channel = love.thread.getChannel(CRASH_CHANNEL_NAME)
++    local crash_report = crash_channel:pop()
++
++    if crash_report then
++        print("!!! SERVER THREAD CRASHED ON STARTUP: " .. crash_report)
++    elseif not G.SERVER_THREAD:isRunning() then
++        print("!!! SERVER THREAD FAILED TO START FOR AN UNKNOWN REASON.")
++    else
++        print("--- Server thread started successfully. ---")
++    end
++
++    -- Get channels using the names defined in globals.lua and store them in G
++    G.SERVER_TX_CHANNEL = love.thread.getChannel(G.SERVER_TX_CHANNEL_NAME)
++    G.SERVER_RX_CHANNEL = love.thread.getChannel(G.SERVER_RX_CHANNEL_NAME)
++    -- =======================================
+ 
+-	--Set the mouse to invisible immediately, this visibility is handled in the G.CONTROLLER
+-	love.mouse.setVisible(false)
++    --Set the mouse to invisible immediately, this visibility is handled in the G.CONTROLLER
++    love.mouse.setVisible(false)
+ end
+ 
+ function love.quit()
+ 	--Steam integration
+ 	if G.SOUND_MANAGER then G.SOUND_MANAGER.channel:push({type = 'stop'}) end
++
++    -- SHUTDOWN SERVER THREAD
++    if G.SERVER_THREAD and G.SERVER_THREAD:isRunning() then
++        -- Signal the thread to quit (as implemented in server_thread.lua)
++        G.SERVER_TX_CHANNEL:push("QUIT") 
++        G.SERVER_THREAD:wait()
++    end
++
+ 	if G.STEAM then G.STEAM:shutdown() end
+ end
+ 
+ function love.update( dt )
+-	--Perf monitoring checkpoint
++    --Perf monitoring checkpoint
+     timer_checkpoint(nil, 'update', true)
+     G:update(dt)
+-end
+ 
+-function love.draw()
+-	--Perf monitoring checkpoint
+-    timer_checkpoint(nil, 'draw', true)
+-	G:draw()
++    -- SERVER COMMAND HANDLING (Polling the channel from G)
++    -- Make sure G.SERVER_TX_CHANNEL exists before trying to pop from it
++    if G.SERVER_TX_CHANNEL then
++        local command_data = G.SERVER_TX_CHANNEL:pop()
++        if command_data and command_data.type == "command" then
++            local command = command_data.payload
++            local response_str
++			
++			print("Received command from server thread: " .. command)
++            -- Implement your game state/data commands here
++            if command == "time" then
++                response_str = "Game Uptime: " .. G.TIMERS.UPTIME
++            elseif command == "state" then
++                response_str = "Current State: " .. G.STATE
++            else
++                response_str = string.format("Error: Unknown command '%s'", command)
++            end
++            
++            -- Push the response back to the server thread
++            G.SERVER_RX_CHANNEL:push({response = response_str})
++        end
++    end
+ end
+ 
+ function love.keypressed(key)
