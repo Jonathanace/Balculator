@@ -1,6 +1,8 @@
 Gymasium/
 game/game_files/*
 !game/game_files/server_thread.lua
+!game/game_files/command_handler.lua
+!game/game_files/custom_update.lua
 scratch/
 test/
 .venv/

@@ -158,16 +158,18 @@ def run_command(command, cwd='.', wait=False):
         return None
 
 def parse_lua_path(path_str):
-    """Parses a Lua-style path string (e.g., 'GAME.hands[1].id') 
-        into a list of keys/indices (e.g., ['GAME', 'hands', 1, 'id'])."""
+    """Parses a Lua-style path string into a list of keys/indices."""
+    # Handle the special case where the path is just "G" (the root)
+    if path_str.strip().upper() == "G":
+        return [] # Return empty list for the root
+
     parts = []
-    # Regex finds either words (keys) or numbers inside brackets (indices)
     for match in re.findall(r'(\w+)|\[(\d+)\]', path_str):
         key, index = match
         if index:
-            parts.append(int(index)) # Convert index to integer
+            parts.append(int(index))
         elif key:
-            parts.append(key)      # Keep key as string
+            parts.append(key)
     return parts
 
 def start_game():
@@ -186,7 +188,9 @@ def start_script():
     print("-" * 20)
     print("Balatro Command Client")
     print("Type your command and press Enter. Type 'quit' or 'exit' to close.")
-    time.sleep(3) # Give game time to initialize
+    # time.sleep(15) # Give game time to initialize
+    # send_lua_command("click_by_func", func_name="start_run")
+    # send_lua_command("click_by_func", func_name="start_run")
     
     while True:
         try:
@@ -198,10 +202,12 @@ def start_script():
 
             # Add command to history immediately
             past_commands.append(command_input)
+            command_parts = command_input.strip().split()
+            command_name = command_parts[0]
+            args = command_parts[1:]
 
-            # --- Handle Local Python Commands FIRST ---
+            # --- Handle Local Python Commands
             if command_input.lower() == "list_commands":
-                # Define or fetch your list of Lua commands
                 lua_commands = ["list_keys <path>", "get_game_state <path>", "call <func_name>", 
                                 "list_buttons", "click_card <index>", "click_by_text <text>", 
                                 "click_by_func <func_name>"] 
@@ -216,10 +222,11 @@ def start_script():
 
             elif command_input.lower() in ["quit", "exit"]:
                 print("Exiting.")
+                send_lua_command("call", func_name="quit")
                 break # Exit the loop
 
             # --- If not a local command, send the RAW command string to Lua ---
-            send_command(command_input) 
+            send_lua_command(command_name, args=args)
 
         except KeyboardInterrupt:
             print("\nCtrl+C detected. Exiting.")

@@ -225,19 +225,38 @@ local function handle_list_clickable(command)
     else return {type="string", payload="LUA_ERROR (json): " .. tostring(json_str)} end
 end
 
-local function handle_click_by_func(command)
-    local target_func_name = command:match("^click_by_func%s+(.+)$") -- Corrected pattern
-    if not target_func_name then return {type="string", payload="LUA_ERROR: No function name provided."} end
+local function handle_click_by_func(payload) -- Signature changed to accept payload table
+    -- 1. Get the function name directly from the payload table
+    local target_func_name = payload.func_name 
+    
+    -- 2. Check if the function name exists in the payload
+    if not target_func_name or type(target_func_name) ~= "string" then
+        return {type="string", payload="LUA_ERROR: 'func_name' (string) missing or invalid in click_by_func payload."}
+    end
+
+    -- 3. Search for the element using the function name (No changes needed here)
     local target_element = find_element_by_func(G.STAGE_OBJECTS, target_func_name)
     if not target_element then target_element = find_element_by_func(G.HUD, target_func_name) end
-    if not target_element then target_element = find_element_by_func(G.buttons, target_func_name) end
-    if not target_element then target_element = find_element_by_func(G.UI, target_func_name) end
-    if not target_element then target_element = find_element_by_func(G.OVERLAY_MENU, target_func_name) end
-    if not target_element then return {type="string", payload="LUA_ERROR: Element with func '" .. target_func_name .. "' not found."} end
-    if type(target_element.click) ~= "function" then return {type="string", payload="LUA_ERROR: Element has no .click() method."} end
-    local success, err = pcall(target_element.click, target_element)
-    if success then return {type="string", payload="Clicked element with func: '" .. target_func_name .. "'"}
-    else return {type="string", payload="LUA_ERROR (runtime click): " .. tostring(err)} end
+    if not target_element then target_element = find_element_by_func(G.buttons, target_func_name) end 
+    if not target_element then target_element = find_element_by_func(G.UI, target_func_name) end 
+    if not target_element then target_element = find_element_by_func(G.OVERLAY_MENU, target_func_name) end 
+
+    if not target_element then
+        return {type="string", payload="LUA_ERROR: Clickable element with function '" .. target_func_name .. "' not found."}
+    end
+
+    -- 4. Check if it has a click method (No changes needed here)
+    if type(target_element.click) ~= "function" then
+        return {type="string", payload="LUA_ERROR: Found element for func '" .. target_func_name .. "', but it has no .click() method."}
+    end
+
+    -- 5. Call the element's click method safely (No changes needed here)
+    local success, err = pcall(target_element.click, target_element) 
+    if success then
+        return {type="string", payload="Successfully clicked element with func: '" .. target_func_name .. "'"}
+    else
+        return {type="string", payload="LUA_ERROR (runtime clicking by func): " .. tostring(err)}
+    end
 end
 
 local function handle_unknown(command)
@@ -245,24 +264,43 @@ local function handle_unknown(command)
     return {type="string", payload=response_str}
 end
 
-function CommandHandler.process(command_string)
-    if not command_string or type(command_string) ~= "string" then
-        return handle_unknown(command_string)
+function CommandHandler.process(command_json_string) -- Argument is the JSON string
+    -- 1. Decode JSON safely
+    local success, payload = pcall(json.decode, command_json_string)
+    if not success then
+        local err_msg = "LUA_ERROR: Invalid JSON. Error: " .. tostring(payload) .. ". Original: " .. tostring(command_json_string)
+        return {type="string", payload=err_msg}
     end
-    print("CommandHandler.process received string: >" .. command_string .. "< | Length:", #command_string)
 
-    if command_string:match("^call ") then
-        return handle_call(command_string)
-    elseif command_string:match("^get_game_state") then
-        return handle_get_game_state(command_string)
-    elseif command_string:match("^list_keys") then
-        return handle_list_keys(command_string)
-    elseif command_string == "list_buttons" then
-        return handle_list_clickable(command_string)
-    elseif command_string:match("^click_by_func") then 
-        return handle_click_by_func(command_string)
+    -- 2. Validate payload structure
+    if type(payload) ~= "table" then
+        return {type="string", payload="LUA_ERROR: Decoded JSON payload is not a table."}
+    end
+
+    -- 3. Get command_name AND CHECK IF IT EXISTS
+    local command_name = payload.command
+    if not command_name or type(command_name) ~= "string" then
+        return {type="string", payload="LUA_ERROR: Payload missing 'command' field or it's not a string."}
+    end
+
+    -- 4. Route based on the command_name from the payload
+    if command_name == "call" then       -- Use == for exact match
+        return handle_call(payload)      -- Pass the payload table
+    elseif command_name == "get_game_state" then
+        return handle_get_game_state(payload)
+    elseif command_name == "list_keys" then
+        return handle_list_keys(payload)
+    elseif command_name == "list_buttons" then
+        return handle_list_clickable(payload)
+    elseif command_name == "click_by_func" then
+        return handle_click_by_func(payload)
+    elseif command_name == "click_by_text" then
+        return handle_click_by_text(payload)
+    elseif command_name == "click_card" then
+        return handle_click_card(payload)
+    -- Add other specific command names here
     else
-        return handle_unknown(command_string)
+        return handle_unknown(command_name) -- Pass just the name for the error
     end
 end
 
