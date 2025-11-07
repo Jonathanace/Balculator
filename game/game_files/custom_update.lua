@@ -12,8 +12,9 @@ function CustomUpdate.update(dt)
             print("Received command from server thread: " .. command)
 
             local response = CommandHandler.process(command)
+            local response_json = json.encode(response)
             
-            G.SERVER_RX_CHANNEL:push(response)
+            G.SERVER_RX_CHANNEL:push({type="string", payload=response_json})
         end
     end
 end

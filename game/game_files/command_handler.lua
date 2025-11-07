@@ -167,24 +167,45 @@ local function find_element_by_func(node, target_func_name)
 end
 
 -- --- Private Command Handlers (Expecting String Arguments) ---
-local function handle_call(command)
-    local args = {}
-    for word in command:gmatch("%S+") do table.insert(args, word) end
-    local func_name = args[2]
-    local call_args = {select(3, unpack(args))}
-    if func_name and G.FUNCS[func_name] then
-        print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
-        local success, err
-        if func_name == 'select_blind' and #call_args == 0 then
-            success, err = pcall(G.FUNCS[func_name], {})
-        else
-            success, err = pcall(G.FUNCS[func_name], unpack(call_args))
+local function handle_call(payload)
+    local func_name = payload.args and payload.args[1]
+    local call_args = {}
+
+    if payload.args then 
+        for i = 2, #payload.args do
+            table.insert(call_args, payload.args[i])
         end
+    end
+    
+
+    if func_name and (G.FUNCS[func_name] or _G[func_name]) then 
+        local func = G.FUNCS[func_name] or _G[func_name]
+        print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
+        local success, err = pcall(func, unpack(call_args))
         if success then return {type="string", payload="Successfully called " .. func_name}
         else return {type="string", payload="LUA_ERROR (runtime call "..func_name.."): " .. tostring(err)} end
     else
         return {type="string", payload=string.format("Error: Function '%s' not found.", func_name or "nil")}
     end
+
+--     Old implementation for reference: for word in payload.command:gmatch("%S+") do table.insert(args, word) end
+
+--     local func_name = args[2]
+--     local call_args = {select(3, unpack(args))}
+--     if func_name and G.FUNCS[func_name] then
+--         print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
+--         local success, err
+--         if func_name == 'select_blind' and #call_args == 0 then
+--             success, err = pcall(G.FUNCS[func_name], {})
+--         else
+--             success, err = pcall(G.FUNCS[func_name], unpack(call_args))
+--         end
+--         if success then return {type="string", payload="Successfully called " .. func_name}
+--         else return {type="string", payload="LUA_ERROR (runtime call "..func_name.."): " .. tostring(err)} end
+--     else
+--         return {type="string", payload=string.format("Error: Function '%s' not found.", func_name or "nil")}
+--     end
+-- end
 end
 
 local function handle_get_game_state(command)

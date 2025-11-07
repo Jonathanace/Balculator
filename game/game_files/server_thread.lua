@@ -3,6 +3,7 @@ package.cpath = package.cpath .. ";lua_modules/lib/lua/5.1/?.dll"
 
 local socket = require("socket")
 local love = require("love")
+local bit = require("bit") -- might need  to remove this
 
 -- --- Configuration ---
 local TX_CHANNEL_NAME = "server_tx_commands"
@@ -15,11 +16,11 @@ local tx_channel = love.thread.getChannel(TX_CHANNEL_NAME)
 local rx_channel = love.thread.getChannel(RX_CHANNEL_NAME)
 
 -- Push a success message to the main thread's log
-tx_channel:push({type="log", payload="--- LuaSocket server thread is running on port " .. PORT .. " ---"})
+tx_channel:push({ type = "log", payload = "--- LuaSocket server thread is running on port " .. PORT .. " ---" })
 
 server:settimeout(0.1)
 
-function pack_int32_le(num)
+local function pack_int32_le(num)
     -- Extract the 4 bytes using bitwise operations
     -- Little-endian means the least significant byte comes first
     local b1 = bit.band(num, 0xFF)
@@ -37,19 +38,20 @@ while true do
     if client then
         -- Once a client is connected, handle one command-response cycle
         client:settimeout(5) -- Set a timeout to prevent hangs
-        
+
         local command, err = client:receive()
 
         if command then
+            print("Lua server: Received command:", command)
             -- 1. Trim whitespace and newlines from the command
             command = command:match("^%s*(.-)%s*$")
 
             -- 2. Send the clean command to the main game thread ONCE
-            tx_channel:push({type = "command", payload = command})
-            
+            tx_channel:push({ type = "command", payload = command })
+
             -- 3. Wait for a response from the main game thread
             local response_data = rx_channel:demand()
-            
+
             -- 4. Check the type of response and handle it accordingly
             if response_data and response_data.type == "string" then
                 local payload = response_data.payload
@@ -59,9 +61,10 @@ while true do
             elseif response_data and response_data.type == "json_blob" then
                 local json_str = response_data.payload
                 local response_size = #json_str
-                
+
                 -- Log the size for debugging
-                tx_channel:push({type="log", payload="Server thread: Sending JSON blob of size: " .. tostring(response_size)})
+                tx_channel:push({ type = "log", payload = "Server thread: Sending JSON blob of size: " ..
+                tostring(response_size) })
 
                 -- 1. Send the total size first, so Python knows what to expect
                 client:send(pack_int32_le(response_size))
@@ -76,12 +79,14 @@ while true do
                 client:send(pack_int32_le(#err_msg))
                 client:send(err_msg)
             end
+        else
+            print("Lua server: Failed to receive command, err:", err)
         end
 
         -- Close the connection immediately after responding
         client:close()
     end
-    
+
     -- Check for the quit signal
     if tx_channel:getCount() > 0 and tx_channel:peek() == "QUIT" then
         server:close()
