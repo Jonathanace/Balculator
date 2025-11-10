@@ -1,6 +1,6 @@
 -- command_handler.lua
-local json = require("json") 
-local CommandHandler = {} 
+local json = require("json")
+local CommandHandler = {}
 
 -- --- Private Helper Functions ---
 local function sanitize_for_json(data)
@@ -29,10 +29,16 @@ local function sanitize_for_json(data)
             end
         elseif value_type == "userdata" then
             local meta = getmetatable(value)
-            if meta == Card then return { _type = "Card", id = value.base.id, edition = value.edition and value.edition.id or "None" }
-            else return "userdata: " .. tostring(value) end
-        elseif value_type == "function" then return nil
-        else return value end
+            if meta == Card then
+                return { _type = "Card", id = value.base.id, edition = value.edition and value.edition.id or "None" }
+            else
+                return "userdata: " .. tostring(value)
+            end
+        elseif value_type == "function" then
+            return nil
+        else
+            return value
+        end
     end
     return recursive_sanitize(data, 1)
 end
@@ -44,15 +50,21 @@ local function string_split_path(str)
         local next_dot = str:find("%.", current_pos, true) or (#str + 1)
         local next_bracket = str:find("%[", current_pos, true) or (#str + 1)
         local next_sep_pos
-        if dot_pos and bracket_pos then next_sep_pos = math.min(dot_pos, bracket_pos)
-        elseif dot_pos then next_sep_pos = dot_pos
-        elseif bracket_pos then next_sep_pos = bracket_pos
-        else next_sep_pos = #str + 1 end
+        if dot_pos and bracket_pos then
+            next_sep_pos = math.min(dot_pos, bracket_pos)
+        elseif dot_pos then
+            next_sep_pos = dot_pos
+        elseif bracket_pos then
+            next_sep_pos = bracket_pos
+        else
+            next_sep_pos = #str + 1
+        end
         local part = str:sub(current_pos, next_sep_pos - 1)
         if #part > 0 then table.insert(result, part) end
         if next_sep_pos > #str then break end
         local sep = str:sub(next_sep_pos, next_sep_pos)
-        if sep == "." then current_pos = next_sep_pos + 1
+        if sep == "." then
+            current_pos = next_sep_pos + 1
         elseif sep == "[" then
             local end_bracket = str:find("%]", next_sep_pos + 1, true)
             if not end_bracket then error("Mismatched brackets: " .. str) end
@@ -72,15 +84,19 @@ local function find_table_by_path(root, path_str)
     for i, key in ipairs(path_parts) do
         local current_type = type(target)
         if current_type ~= "table" then
-            return nil, string.format("Path segment '%s' is not a table.", tostring(path_parts[i-1] or "G"))
+            return nil, string.format("Path segment '%s' is not a table.", tostring(path_parts[i - 1] or "G"))
         end
         local next_target = rawget(target, key)
         if next_target == nil then
             next_target = target[key]
             if next_target == nil then
                 local error_path = ""
-                for j=1, i do error_path = error_path .. (type(path_parts[j])=='number' and '['..path_parts[j]..']' or '.'..path_parts[j]) end
-                return nil, string.format("Path not found: Key/Index '%s' in path %s", tostring(key), error_path:gsub("^%.",""))
+                for j = 1, i do
+                    error_path = error_path ..
+                        (type(path_parts[j]) == 'number' and '[' .. path_parts[j] .. ']' or '.' .. path_parts[j])
+                end
+                return nil,
+                    string.format("Path not found: Key/Index '%s' in path %s", tostring(key), error_path:gsub("^%.", ""))
             end
         end
         target = next_target
@@ -98,7 +114,7 @@ local function find_clickable_elements(node, path_prefix, clickable_list, found_
                 table.insert(clickable_list, identifier)
                 found_items[identifier] = true
             end
-        -- Also check for FUNC: style if no text
+            -- Also check for FUNC: style if no text
         elseif node.config and node.config.button then
             local identifier = "FUNC:" .. node.config.button
             if not found_items[identifier] then
@@ -109,15 +125,15 @@ local function find_clickable_elements(node, path_prefix, clickable_list, found_
     end
     if node.children and type(node.children) == 'table' then
         for key, child in pairs(node.children) do
-            local key_str = type(key) == 'number' and '['..tostring(key)..']' or '.'..tostring(key)
+            local key_str = type(key) == 'number' and '[' .. tostring(key) .. ']' or '.' .. tostring(key)
             local new_path = path_prefix .. ".children" .. key_str
             find_clickable_elements(child, new_path, clickable_list, found_items)
         end
     elseif type(node) == 'table' then
         if node == G then return end
         for key, value in pairs(node) do
-            local key_str = type(key) == 'number' and '['..tostring(key)..']' or '.'..tostring(key)
-            local new_path = path_prefix == "" and key_str:gsub("^%.","") or path_prefix .. key_str
+            local key_str = type(key) == 'number' and '[' .. tostring(key) .. ']' or '.' .. tostring(key)
+            local new_path = path_prefix == "" and key_str:gsub("^%.", "") or path_prefix .. key_str
             find_clickable_elements(value, new_path, clickable_list, found_items)
         end
     end
@@ -142,7 +158,9 @@ local function find_element_by_func(node, target_func_name)
                     return node -- Perfect match!
                 else
                     -- Log exactly why it failed the state check
-                    debug_log("!!! Found matching func, but state invalid. Visible:", tostring(node.states and node.states.visible), "Clickable:", tostring(node.states and node.states.click.can))
+                    debug_log("!!! Found matching func, but state invalid. Visible:",
+                        tostring(node.states and node.states.visible), "Clickable:",
+                        tostring(node.states and node.states.click.can))
                 end
             end
         end
@@ -154,13 +172,13 @@ local function find_element_by_func(node, target_func_name)
             local found = find_element_by_func(child, target_func_name)
             if found then return found end
         end
-    -- Recursively search other table elements (same as before)
+        -- Recursively search other table elements (same as before)
     elseif type(node) == 'table' then
-         if node == G then return nil end
-         for _, value in pairs(node) do
-             local found = find_element_by_func(value, target_func_name)
-             if found then return found end
-         end
+        if node == G then return nil end
+        for _, value in pairs(node) do
+            local found = find_element_by_func(value, target_func_name)
+            if found then return found end
+        end
     end
 
     return nil -- Not found
@@ -171,67 +189,84 @@ local function handle_call(payload)
     local func_name = payload.args and payload.args[1]
     local call_args = {}
 
-    if payload.args then 
+    if payload.args then
         for i = 2, #payload.args do
             table.insert(call_args, payload.args[i])
         end
     end
-    
 
-    if func_name and (G.FUNCS[func_name] or _G[func_name]) then 
+
+    if func_name and (G.FUNCS[func_name] or _G[func_name]) then
         local func = G.FUNCS[func_name] or _G[func_name]
         print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
         local success, err = pcall(func, unpack(call_args))
-        if success then return {type="string", payload="Successfully called " .. func_name}
-        else return {type="string", payload="LUA_ERROR (runtime call "..func_name.."): " .. tostring(err)} end
+        if success then
+            return { type = "string", payload = "Successfully called " .. func_name }
+        else
+            return { type = "string", payload = "LUA_ERROR (runtime call " .. func_name .. "): " .. tostring(err) }
+        end
     else
-        return {type="string", payload=string.format("Error: Function '%s' not found.", func_name or "nil")}
+        return { type = "string", payload = string.format("Error: Function '%s' not found.", func_name or "nil") }
     end
 
---     Old implementation for reference: for word in payload.command:gmatch("%S+") do table.insert(args, word) end
+    --     Old implementation for reference: for word in payload.command:gmatch("%S+") do table.insert(args, word) end
 
---     local func_name = args[2]
---     local call_args = {select(3, unpack(args))}
---     if func_name and G.FUNCS[func_name] then
---         print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
---         local success, err
---         if func_name == 'select_blind' and #call_args == 0 then
---             success, err = pcall(G.FUNCS[func_name], {})
---         else
---             success, err = pcall(G.FUNCS[func_name], unpack(call_args))
---         end
---         if success then return {type="string", payload="Successfully called " .. func_name}
---         else return {type="string", payload="LUA_ERROR (runtime call "..func_name.."): " .. tostring(err)} end
---     else
---         return {type="string", payload=string.format("Error: Function '%s' not found.", func_name or "nil")}
---     end
--- end
+    --     local func_name = args[2]
+    --     local call_args = {select(3, unpack(args))}
+    --     if func_name and G.FUNCS[func_name] then
+    --         print("Dynamically calling function:", func_name, "with", #call_args, "arguments")
+    --         local success, err
+    --         if func_name == 'select_blind' and #call_args == 0 then
+    --             success, err = pcall(G.FUNCS[func_name], {})
+    --         else
+    --             success, err = pcall(G.FUNCS[func_name], unpack(call_args))
+    --         end
+    --         if success then return {type="string", payload="Successfully called " .. func_name}
+    --         else return {type="string", payload="LUA_ERROR (runtime call "..func_name.."): " .. tostring(err)} end
+    --     else
+    --         return {type="string", payload=string.format("Error: Function '%s' not found.", func_name or "nil")}
+    --     end
+    -- end
 end
 
 local function handle_get_game_state(command)
     local path_str = command:match("^get_game_state%s+(.*)$")
-    if not path_str then return {type="string", payload="LUA_ERROR: No path provided."} end
+    if not path_str then return { type = "string", payload = "LUA_ERROR: No path provided." } end
     local target_value, err = find_table_by_path(G, path_str)
     if err and not target_value then
-        if not string.find(err, "Path not found") then return {type="string", payload="LUA_ERROR: " .. err} end
+        if not string.find(err, "Path not found") then return { type = "string", payload = "LUA_ERROR: " .. err } end
         target_value = nil
     end
     local success, result = pcall(function() return json.encode(sanitize_for_json(target_value)) end)
-    if success then return {type="json_blob", payload=result}
-    else return {type="string", payload="LUA_ERROR (sanitize/encode): " .. tostring(result)} end
+    if success then
+        return { type = "json_blob", payload = result }
+    else
+        return { type = "string", payload = "LUA_ERROR (sanitize/encode): " .. tostring(result) }
+    end
 end
 
 local function handle_list_keys(command)
     local path_str = command:match("^list_keys%s*(.*)$")
     local target_table, err = find_table_by_path(G, path_str)
-    if not target_table then return {type="string", payload="LUA_ERROR: " .. (err or "Target not found.")} end
-    if type(target_table) ~= "table" then return {type="string", payload="LUA_ERROR: Path does not point to a table."} end
+    if not target_table then return { type = "string", payload = "LUA_ERROR: " .. (err or "Target not found.") } end
+    if type(target_table) ~= "table" then
+        return {
+            type = "string",
+            payload =
+            "LUA_ERROR: Path does not point to a table."
+        }
+    end
     local keys_and_types = {}
     local key = nil
-    while true do key = next(target_table, key); if key == nil then break end; keys_and_types[key] = type(rawget(target_table, key)) end
+    while true do
+        key = next(target_table, key); if key == nil then break end; keys_and_types[key] = type(rawget(target_table, key))
+    end
     local success, json_str = pcall(json.encode, keys_and_types)
-    if success then return {type="json_blob", payload=json_str}
-    else return {type="string", payload="LUA_ERROR (json): " .. tostring(json_str)} end
+    if success then
+        return { type = "json_blob", payload = json_str }
+    else
+        return { type = "string", payload = "LUA_ERROR (json): " .. tostring(json_str) }
+    end
 end
 
 local function handle_list_clickable(command)
@@ -242,71 +277,87 @@ local function handle_list_clickable(command)
     if G.UI then find_clickable_elements(G.UI, "UI", clickable_elements) end
     if G.OVERLAY_MENU then find_clickable_elements(G.OVERLAY_MENU, "OVERLAY_MENU", clickable_elements) end
     local success, json_str = pcall(json.encode, clickable_elements)
-    if success then return {type="json_blob", payload=json_str}
-    else return {type="string", payload="LUA_ERROR (json): " .. tostring(json_str)} end
+    if success then
+        return { type = "json_blob", payload = json_str }
+    else
+        return { type = "string", payload = "LUA_ERROR (json): " .. tostring(json_str) }
+    end
 end
 
 local function handle_click_by_func(payload) -- Signature changed to accept payload table
     -- 1. Get the function name directly from the payload table
-    local target_func_name = payload.func_name 
-    
+    local target_func_name = payload.func_name
+
     -- 2. Check if the function name exists in the payload
     if not target_func_name or type(target_func_name) ~= "string" then
-        return {type="string", payload="LUA_ERROR: 'func_name' (string) missing or invalid in click_by_func payload."}
+        return {
+            type = "string",
+            payload =
+            "LUA_ERROR: 'func_name' (string) missing or invalid in click_by_func payload."
+        }
     end
 
     -- 3. Search for the element using the function name (No changes needed here)
     local target_element = find_element_by_func(G.STAGE_OBJECTS, target_func_name)
     if not target_element then target_element = find_element_by_func(G.HUD, target_func_name) end
-    if not target_element then target_element = find_element_by_func(G.buttons, target_func_name) end 
-    if not target_element then target_element = find_element_by_func(G.UI, target_func_name) end 
-    if not target_element then target_element = find_element_by_func(G.OVERLAY_MENU, target_func_name) end 
+    if not target_element then target_element = find_element_by_func(G.buttons, target_func_name) end
+    if not target_element then target_element = find_element_by_func(G.UI, target_func_name) end
+    if not target_element then target_element = find_element_by_func(G.OVERLAY_MENU, target_func_name) end
 
     if not target_element then
-        return {type="string", payload="LUA_ERROR: Clickable element with function '" .. target_func_name .. "' not found."}
+        return {
+            type = "string",
+            payload = "LUA_ERROR: Clickable element with function '" ..
+                target_func_name .. "' not found."
+        }
     end
 
     -- 4. Check if it has a click method (No changes needed here)
     if type(target_element.click) ~= "function" then
-        return {type="string", payload="LUA_ERROR: Found element for func '" .. target_func_name .. "', but it has no .click() method."}
+        return {
+            type = "string",
+            payload = "LUA_ERROR: Found element for func '" ..
+                target_func_name .. "', but it has no .click() method."
+        }
     end
 
     -- 5. Call the element's click method safely (No changes needed here)
-    local success, err = pcall(target_element.click, target_element) 
+    local success, err = pcall(target_element.click, target_element)
     if success then
-        return {type="string", payload="Successfully clicked element with func: '" .. target_func_name .. "'"}
+        return { type = "string", payload = "Successfully clicked element with func: '" .. target_func_name .. "'" }
     else
-        return {type="string", payload="LUA_ERROR (runtime clicking by func): " .. tostring(err)}
+        return { type = "string", payload = "LUA_ERROR (runtime clicking by func): " .. tostring(err) }
     end
 end
 
 local function handle_unknown(command)
     local response_str = string.format("Error: Unknown command '%s'", command or "nil")
-    return {type="string", payload=response_str}
+    return { type = "string", payload = response_str }
 end
 
 function CommandHandler.process(command_json_string) -- Argument is the JSON string
     -- 1. Decode JSON safely
     local success, payload = pcall(json.decode, command_json_string)
     if not success then
-        local err_msg = "LUA_ERROR: Invalid JSON. Error: " .. tostring(payload) .. ". Original: " .. tostring(command_json_string)
-        return {type="string", payload=err_msg}
+        local err_msg = "LUA_ERROR: Invalid JSON. Error: " ..
+            tostring(payload) .. ". Original: " .. tostring(command_json_string)
+        return { type = "string", payload = err_msg }
     end
 
     -- 2. Validate payload structure
     if type(payload) ~= "table" then
-        return {type="string", payload="LUA_ERROR: Decoded JSON payload is not a table."}
+        return { type = "string", payload = "LUA_ERROR: Decoded JSON payload is not a table." }
     end
 
     -- 3. Get command_name AND CHECK IF IT EXISTS
     local command_name = payload.command
     if not command_name or type(command_name) ~= "string" then
-        return {type="string", payload="LUA_ERROR: Payload missing 'command' field or it's not a string."}
+        return { type = "string", payload = "LUA_ERROR: Payload missing 'command' field or it's not a string." }
     end
 
     -- 4. Route based on the command_name from the payload
-    if command_name == "call" then       -- Use == for exact match
-        return handle_call(payload)      -- Pass the payload table
+    if command_name == "call" then  -- Use == for exact match
+        return handle_call(payload) -- Pass the payload table
     elseif command_name == "get_game_state" then
         return handle_get_game_state(payload)
     elseif command_name == "list_keys" then
@@ -319,7 +370,7 @@ function CommandHandler.process(command_json_string) -- Argument is the JSON str
         return handle_click_by_text(payload)
     elseif command_name == "click_card" then
         return handle_click_card(payload)
-    -- Add other specific command names here
+        -- Add other specific command names here
     else
         return handle_unknown(command_name) -- Pass just the name for the error
     end
