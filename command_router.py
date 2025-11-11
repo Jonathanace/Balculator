@@ -10,6 +10,10 @@ import os
 HOST = "127.0.0.1"
 PORT = 12345
 
+def call_safe_router(command, args_list=[]):
+    lua_args = ["safe_command_router", command] + args_list
+    send_lua_command("call", lua_args)
+
 def run_command(command, cwd=".", wait=False):
     logging.info(f"Running command: {command}")
     try:
@@ -37,18 +41,12 @@ def run_command(command, cwd=".", wait=False):
         return None
 
 def process_command(command_name, args=None, command_history=None):
-    if command_name in DISPATCH_TABLE:
-        logging.info(f"Processing command: {command_name} with args: {args}")
-        try:
-            if not args:
-                result = DISPATCH_TABLE[command_name]()
-            else:
-                result = DISPATCH_TABLE[command_name](args)
-            if result is not None:
-                logging.info(f"Command '{command_name}' executed with result: {result}")
-                return result
-        except Exception as e: 
-            logging.error(f"Error executing command '{command_name}': {e} from lua router.")
+    if command_name in FUNCS:
+        logging.info(f"Processing command: {command_name}")
+        if not args:
+            FUNCS[command_name]()
+        else:
+            FUNCS[command_name](args)
     else:
         logging.error("Invalid command entered")
 
@@ -64,7 +62,6 @@ def send_lua_command(command_name, args):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT))
             s.sendall(json_payload_str.encode('utf-8') + b"\n")
-
             size_bytes = s.recv(4)
             if not size_bytes:
                 logging.error("ERROR: Did not receive valid size prefix from server.")
@@ -88,12 +85,15 @@ def send_lua_command(command_name, args):
         logging.error(f"ERROR: Could not connect/send/receive to Lua server at {HOST}:{PORT}: {e}")
         return None
 
-def lua_print(args):
+def call_lua_command(args):
+    send_lua_command("call", args)
+
+def lua_log(args):
     for arg in args:
-        send_lua_command("call", ["print", str(arg)])
+        call_safe_router("log", [str(arg)])
 
 def send_test_message():
-    lua_print(["This is a test message!"])
+    lua_log(["This is a test message!"])
 
 def launch_game(headless=False):
     logging.debug("Launching the game")
@@ -109,27 +109,36 @@ def launch_game(headless=False):
         logging.error("Failed to launch the game.")
 
 def close_game():
+    logging.info("Closing the game...")
     try:
-        send_lua_command("call", ["quit"])
-    except OSError as e:
-        if getattr(e, 'errno', None) == 10038:  # Transport endpoint is not connected
-            logging.info("Lua server already closed the connection.")
-        else:
-            logging.error(f"An unexpected OSError occurred: {e}")
-            return
+        call_safe_router("quit", []) 
     except Exception as e:
-        logging.error(f"An unexpected error occurred while closing the game: {e}")
-    return
+        logging.error(f"An error occurred while sending the 'quit' command: {e}")
+
+def select_blind():
+    send_lua_command("call", ["select_blind"])
+
+def play_highlighted_cards():
+    send_lua_command("call", ["play_cards_from_highlighted"])
+
+def start_new_run():
+    call_safe_router("start_run")
 
 def exit_script():
         logging.info("Exiting application.")
         close_game()
         sys.exit(0)
 
-DISPATCH_TABLE = {
+FUNCS = {
     "exit": exit_script,
     "quit": exit_script,
     "test": send_test_message,
     "send_test_message": send_test_message,
-    "call": send_lua_command
+    "play_highlighted": play_highlighted_cards,
+    "play_cards": play_highlighted_cards,
+    "play": play_highlighted_cards,
+    "select_blind": select_blind,
+    "start_run": start_new_run,
+    "call": call_lua_command,
+    "send_test_message": send_test_message,
 }

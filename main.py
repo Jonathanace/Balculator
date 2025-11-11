@@ -7,16 +7,15 @@ import sys
 from functools import partial
 from tqdm import tqdm
 import time
-import command_router
+from command_router import process_command
 
-def main(commands=None):
+def main(commands=None, startup_wait_time=5):
     if commands is None:
         commands = []
     logging.info("Application is starting up...")
     command_router.launch_game()
 
-    wait_time = 5
-    for _ in tqdm(range(wait_time), desc="Waiting for game to launch"):
+    for _ in tqdm(range(startup_wait_time), desc="Waiting for game to launch"):
         time.sleep(1)
 
     # Execute all passed commands
@@ -58,12 +57,22 @@ def start_main_loop():
             logging.error(f"An error occurred in the main loop: {e}")
             
     logging.debug("Exiting main loop.")
-    command_router.close_game()
+    try:
+        process_command("quit")
+    except Exception as e:
+        logging.error(f"Error when closing game: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     commands = [
-        partial(command_router.send_test_message),
-        partial(command_router.send_lua_command, "call", ["test_add", 5, 7]),
+        # partial(lua_funcs["send_test_message"]),
+        # partial(command_router.call_lua_command, ["test_add", 10, 15]),
+        partial(process_command, "send_test_message"),
+        partial(process_command, "start_run"),
+        # partial(time.sleep, 5),
+        # partial(command_router.select_blind),
+        # partial(time.sleep, 3),
+        # partial(command_router.call_lua_command, ["play_cards_from_highlighted"])
+
     ]
-    main(commands)
+    main(commands, startup_wait_time=5)

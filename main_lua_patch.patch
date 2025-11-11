@@ -1,0 +1,513 @@
+--- original_game_files/main.lua	2025-02-21 10:11:29.536228000 -0800
++++ game/game_files/main.lua	2025-11-11 12:13:14.237164800 -0800
+@@ -1,4 +1,7 @@
+-if (love.system.getOS() == 'OS X' ) and (jit.arch == 'arm64' or jit.arch == 'arm') then jit.off() end
++local Custom = require "custom"
++if (love.system.getOS() == 'OS X') and (jit.arch == 'arm64' or jit.arch == 'arm') then jit.off() end
++require "engine/object"
++if (love.system.getOS() == 'OS X') and (jit.arch == 'arm64' or jit.arch == 'arm') then jit.off() end
+ require "engine/object"
+ require "bit"
+ require "engine/string_packer"
+@@ -27,17 +30,87 @@
+ require "engine/particles"
+ require "engine/text"
+ require "challenges"
++json = require "json"
++-- local CommandHandler = require "command_handler"
++
++
++
++math.randomseed(G.SEED)
++
++-- Redirect 'print' to capture output
++local original_print = print
++G.DEBUG_LOG = {}
++
++
++local LOG_FILENAME = "balatro_game_log.txt"
++function print(...)
++	local args = { ... }
++	local message_parts = {}
++	for i = 1, #args do
++		message_parts[i] = tostring(args[i])
++	end
++	local message = table.concat(message_parts, "\t")
++
++	table.insert(G.DEBUG_LOG, message)
++	if #G.DEBUG_LOG > 15 then
++		table.remove(G.DEBUG_LOG, 1)
++	end
++
++	local timestamp = os.date("[%Y-%m-%d %H:%M:%S] ")
++	local log_entry = timestamp .. message
++
++	local success, err = love.filesystem.append(LOG_FILENAME, log_entry .. "\n")
++	if not success then
++		original_print("!!! ERROR WRITING TO LOG FILE:", err)
++	end
++
++	original_print(message)
++end
++
++love.filesystem.write(LOG_FILENAME, "")
++print("--- Logging redirected to", LOG_FILENAME, "---")
++print("--- LOGGING SYSTEM INITIALIZED ---")
++local socket = require("socket")
++print(socket._VERSION)
++
++
++
++
++function love.draw()
++	-- Perf monitoring checkpoint
++	timer_checkpoint(nil, 'draw', true)
+ 
+-math.randomseed( G.SEED )
++	-- Draw the main game content
++	G:draw()
++
++	-- === DEBUG DRAWING ===
++	if G.F_VERBOSE then
++		local debug_font = G.FONTS.m6x11_20 or love.graphics.getFont()
++
++		love.graphics.setFont(debug_font)
++		love.graphics.setColor(1, 1, 1, 1)
++
++		local screen_width = love.graphics.getWidth()
++		local console_width = 400
++		local right_padding = 300
++		local console_x = screen_width - console_width - right_padding
++
++		local y_pos = 100
++		for i, line in ipairs(G.DEBUG_LOG) do
++			love.graphics.print(line, console_x, y_pos)
++			y_pos = y_pos + 20
++		end
++	end
++	-- =====================
++end
+ 
+ function love.run()
+ 	if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
+ 
+-	-- We don't want the first frame's dt to include time taken by love.load.
+ 	if love.timer then love.timer.step() end
+ 
+ 	local dt = 0
+-	local dt_smooth = 1/100
++	local dt_smooth = 1 / 100
+ 	local run_time = 0
+ 
+ 	-- Main loop time.
+@@ -46,8 +119,8 @@
+ 		-- Process events.
+ 		if love.event and G and G.CONTROLLER then
+ 			love.event.pump()
+-			local _n,_a,_b,_c,_d,_e,_f,touched
+-			for name, a,b,c,d,e,f in love.event.poll() do
++			local _n, _a, _b, _c, _d, _e, _f, touched
++			for name, a, b, c, d, e, f in love.event.poll() do
+ 				if name == "quit" then
+ 					if not love.quit or not love.quit() then
+ 						return a or 0
+@@ -55,20 +128,20 @@
+ 				end
+ 				if name == 'touchpressed' then
+ 					touched = true
+-				elseif name == 'mousepressed' then 
+-					_n,_a,_b,_c,_d,_e,_f = name,a,b,c,d,e,f
++				elseif name == 'mousepressed' then
++					_n, _a, _b, _c, _d, _e, _f = name, a, b, c, d, e, f
+ 				else
+-					love.handlers[name](a,b,c,d,e,f)
++					love.handlers[name](a, b, c, d, e, f)
+ 				end
+ 			end
+-			if _n then 
+-				love.handlers['mousepressed'](_a,_b,_c,touched)
++			if _n then
++				love.handlers['mousepressed'](_a, _b, _c, touched)
+ 			end
+ 		end
+ 
+ 		-- Update dt, as we'll be passing it to update
+ 		if love.timer then dt = love.timer.step() end
+-		dt_smooth = math.min(0.8*dt_smooth + 0.2*dt, 0.1)
++		dt_smooth = math.min(0.8 * dt_smooth + 0.2 * dt, 0.1)
+ 		-- Call update and draw
+ 		if love.update then love.update(dt_smooth) end -- will pass 0 if love.timer is disabled
+ 
+@@ -79,15 +152,15 @@
+ 
+ 		run_time = math.min(love.timer.getTime() - run_time, 0.1)
+ 		G.FPS_CAP = G.FPS_CAP or 500
+-		if run_time < 1./G.FPS_CAP then love.timer.sleep(1./G.FPS_CAP - run_time) end
++		if run_time < 1. / G.FPS_CAP then love.timer.sleep(1. / G.FPS_CAP - run_time) end
+ 	end
+ end
+ 
+-function love.load() 
++function love.load()
+ 	G:start_up()
+ 	--Steam integration
+ 	local os = love.system.getOS()
+-	if os == 'OS X' or os == 'Windows' then 
++	if os == 'OS X' or os == 'Windows' then
+ 		local st = nil
+ 		--To control when steam communication happens, make sure to send updates to steam as little as possible
+ 		if os == 'OS X' then
+@@ -99,6 +172,7 @@
+ 		else
+ 			st = require 'luasteam'
+ 		end
++		print("love.load() finished. Game is starting up.")
+ 
+ 		st.send_control = {
+ 			last_sent_time = -200,
+@@ -111,32 +185,78 @@
+ 		--Set up the render window and the stage for the splash screen, then enter the gameloop with :update
+ 		G.STEAM = st
+ 	else
++
++	end
++
++	-- === FINALIZED SERVER STARTUP LOGIC ===
++	local CRASH_CHANNEL_NAME = "server_crash_report"
++
++	G.SERVER_THREAD = love.thread.newThread("server_thread.lua")
++	G.SERVER_THREAD:start()
++
++	local crash_channel = love.thread.getChannel(CRASH_CHANNEL_NAME)
++	local crash_report = crash_channel:pop()
++
++	if crash_report then
++		print("!!! SERVER THREAD CRASHED ON STARTUP: " .. crash_report)
++	elseif not G.SERVER_THREAD:isRunning() then
++		print("!!! SERVER THREAD FAILED TO START FOR AN UNKNOWN REASON.")
++	else
++		print("--- Server thread started successfully. ---")
+ 	end
+ 
++	-- Get channels using the names defined in globals.lua and store them in G
++	G.SERVER_TX_CHANNEL = love.thread.getChannel(G.SERVER_TX_CHANNEL_NAME)
++	G.SERVER_RX_CHANNEL = love.thread.getChannel(G.SERVER_RX_CHANNEL_NAME)
++	-- =======================================
++
+ 	--Set the mouse to invisible immediately, this visibility is handled in the G.CONTROLLER
+ 	love.mouse.setVisible(false)
+ end
+ 
+ function love.quit()
+ 	--Steam integration
+-	if G.SOUND_MANAGER then G.SOUND_MANAGER.channel:push({type = 'stop'}) end
++	if G.SOUND_MANAGER then G.SOUND_MANAGER.channel:push({ type = 'stop' }) end
++
++	-- SHUTDOWN SERVER THREAD
++	if G.SERVER_THREAD and G.SERVER_THREAD:isRunning() then
++		print("--- Shutting down server thread... ---")
++		-- Signal the thread to quit (as implemented in server_thread.lua)
++		G.SERVER_TX_CHANNEL:push("QUIT")
++
++		-- Wait for the thread to exit, but with a timeout to prevent freezing
++		local timeout = 2 -- Wait for a maximum of 2 seconds
++		local start_time = love.timer.getTime()
++
++		while G.SERVER_THREAD:isRunning() and (love.timer.getTime() - start_time < timeout) do
++			-- Wait for a very short period to avoid hogging the CPU
++			love.timer.sleep(0.01)
++		end
++
++		if G.SERVER_THREAD:isRunning() then
++			print("!!! Server thread did not close in time. Game may force quit. !!!")
++		else
++			print("--- Server thread closed successfully. ---")
++		end
++	end
++
+ 	if G.STEAM then G.STEAM:shutdown() end
+ end
+ 
+-function love.update( dt )
+-	--Perf monitoring checkpoint
+-    timer_checkpoint(nil, 'update', true)
+-    G:update(dt)
++function test_add(a, b)
++	print("test_add called with:", a, b)
++	print(a + b)
+ end
+ 
+-function love.draw()
+-	--Perf monitoring checkpoint
+-    timer_checkpoint(nil, 'draw', true)
+-	G:draw()
++function love.update(dt)
++	timer_checkpoint(nil, 'update', true)
++	G:update(dt)
++	Custom.update(dt)
+ end
+ 
+ function love.keypressed(key)
+-	if not _RELEASE_MODE and G.keybind_mapping[key] then love.gamepadpressed(G.CONTROLLER.keyboard_controller, G.keybind_mapping[key])
++	if not _RELEASE_MODE and G.keybind_mapping[key] then
++		love.gamepadpressed(G.CONTROLLER.keyboard_controller, G.keybind_mapping[key])
+ 	else
+ 		G.CONTROLLER:set_HID_flags('mouse')
+ 		G.CONTROLLER:key_press(key)
+@@ -144,7 +264,8 @@
+ end
+ 
+ function love.keyreleased(key)
+-	if not _RELEASE_MODE and G.keybind_mapping[key] then love.gamepadreleased(G.CONTROLLER.keyboard_controller, G.keybind_mapping[key])
++	if not _RELEASE_MODE and G.keybind_mapping[key] then
++		love.gamepadreleased(G.CONTROLLER.keyboard_controller, G.keybind_mapping[key])
+ 	else
+ 		G.CONTROLLER:set_HID_flags('mouse')
+ 		G.CONTROLLER:key_release(key)
+@@ -154,20 +275,22 @@
+ function love.gamepadpressed(joystick, button)
+ 	button = G.button_mapping[button] or button
+ 	G.CONTROLLER:set_gamepad(joystick)
+-    G.CONTROLLER:set_HID_flags('button', button)
+-    G.CONTROLLER:button_press(button)
++	G.CONTROLLER:set_HID_flags('button', button)
++	G.CONTROLLER:button_press(button)
+ end
+ 
+ function love.gamepadreleased(joystick, button)
+ 	button = G.button_mapping[button] or button
+-    G.CONTROLLER:set_gamepad(joystick)
+-    G.CONTROLLER:set_HID_flags('button', button)
+-    G.CONTROLLER:button_release(button)
++	G.CONTROLLER:set_gamepad(joystick)
++	G.CONTROLLER:set_HID_flags('button', button)
++	G.CONTROLLER:button_release(button)
+ end
+ 
+ function love.mousepressed(x, y, button, touch)
+-    G.CONTROLLER:set_HID_flags(touch and 'touch' or 'mouse')
+-    if button == 1 then 
++	-- Log the raw click event
++	print(string.format("Mouse pressed at (%d, %d), button %d", x, y, button))
++	G.CONTROLLER:set_HID_flags(touch and 'touch' or 'mouse')
++	if button == 1 then
+ 		G.CONTROLLER:queue_L_cursor_press(x, y)
+ 	end
+ 	if button == 2 then
+@@ -175,9 +298,8 @@
+ 	end
+ end
+ 
+-
+ function love.mousereleased(x, y, button)
+-    if button == 1 then G.CONTROLLER:L_cursor_release(x, y) end
++	if button == 1 then G.CONTROLLER:L_cursor_release(x, y) end
+ end
+ 
+ function love.mousemoved(x, y, dx, dy, istouch)
+@@ -185,21 +307,21 @@
+ 	if next(love.touch.getTouches()) ~= nil then
+ 		G.CONTROLLER.last_touch_time = G.TIMERS.UPTIME
+ 	end
+-    G.CONTROLLER:set_HID_flags(G.CONTROLLER.last_touch_time > G.TIMERS.UPTIME - 0.2 and 'touch' or 'mouse')
++	G.CONTROLLER:set_HID_flags(G.CONTROLLER.last_touch_time > G.TIMERS.UPTIME - 0.2 and 'touch' or 'mouse')
+ end
+ 
+-function love.joystickaxis( joystick, axis, value )
+-    if math.abs(value) > 0.2 and joystick:isGamepad() then
++function love.joystickaxis(joystick, axis, value)
++	if math.abs(value) > 0.2 and joystick:isGamepad() then
+ 		G.CONTROLLER:set_gamepad(joystick)
+-        G.CONTROLLER:set_HID_flags('axis')
+-    end
++		G.CONTROLLER:set_HID_flags('axis')
++	end
+ end
+ 
+ function love.errhand(msg)
+ 	if G.F_NO_ERROR_HAND then return end
+ 	msg = tostring(msg)
+ 
+-	if G.SETTINGS.crashreports and _RELEASE_MODE and G.F_CRASH_REPORTS then 
++	if G.SETTINGS.crashreports and _RELEASE_MODE and G.F_CRASH_REPORTS then
+ 		local http_thread = love.thread.newThread([[
+ 			local https = require('https')
+ 			CHANNEL = love.thread.getChannel("http_channel")
+@@ -221,13 +343,13 @@
+ 			str = str:gsub("\n", "\r\n"):gsub("([^%w _%%%-%.~])", char_to_hex):gsub(" ", "+")
+ 			return str
+ 		end
+-		
++
+ 
+ 		local error = msg
+-		local file = string.sub(msg, 0,  string.find(msg, ':'))
+-		local function_line = string.sub(msg, string.len(file)+1)
+-		function_line = string.sub(function_line, 0, string.find(function_line, ':')-1)
+-		file = string.sub(file, 0, string.len(file)-1)
++		local file = string.sub(msg, 0, string.find(msg, ':'))
++		local function_line = string.sub(msg, string.len(file) + 1)
++		function_line = string.sub(function_line, 0, string.find(function_line, ':') - 1)
++		file = string.sub(file, 0, string.len(file) - 1)
+ 		local trace = debug.traceback()
+ 		local boot_found, func_found = false, false
+ 		for l in string.gmatch(trace, "(.-)\n") do
+@@ -236,15 +358,20 @@
+ 			elseif boot_found and not func_found then
+ 				func_found = true
+ 				trace = ''
+-				function_line = string.sub(l, string.find(l, 'in function')+12)..' line:'..function_line
++				function_line = string.sub(l, string.find(l, 'in function') + 12) .. ' line:' .. function_line
+ 			end
+ 
+-			if boot_found and func_found then 
+-				trace = trace..l..'\n'
++			if boot_found and func_found then
++				trace = trace .. l .. '\n'
+ 			end
+ 		end
+ 
+-		http_channel:push('https://958ha8ong3.execute-api.us-east-2.amazonaws.com/?error='..httpencode(error)..'&file='..httpencode(file)..'&function_line='..httpencode(function_line)..'&trace='..httpencode(trace)..'&version='..(G.VERSION))
++		http_channel:push('https://958ha8ong3.execute-api.us-east-2.amazonaws.com/?error=' ..
++			httpencode(error) ..
++			'&file=' ..
++			httpencode(file) ..
++			'&function_line=' ..
++			httpencode(function_line) .. '&trace=' .. httpencode(trace) .. '&version=' .. (G.VERSION))
+ 	end
+ 
+ 	if not love.window or not love.graphics or not love.event then
+@@ -266,7 +393,7 @@
+ 	end
+ 	if love.joystick then
+ 		-- Stop all joystick vibrations.
+-		for i,v in ipairs(love.joystick.getJoysticks()) do
++		for i, v in ipairs(love.joystick.getJoysticks()) do
+ 			v:setVibration()
+ 		end
+ 	end
+@@ -278,9 +405,10 @@
+ 	love.graphics.origin()
+ 
+ 
+-	local p = 'Oops! Something went wrong:\n'..msg..'\n\n'..(not _RELEASE_MODE and debug.traceback() or G.SETTINGS.crashreports and
+-		'Since you are opted in to sending crash reports, LocalThunk HQ was sent some useful info about what happened.\nDon\'t worry! There is no identifying or personal information. If you would like\nto opt out, change the \'Crash Report\' setting to Off' or
+-		'Crash Reports are set to Off. If you would like to send crash reports, please opt in in the Game settings.\nThese crash reports help us avoid issues like this in the future')
++	local p = 'Oops! Something went wrong:\n' ..
++		msg .. '\n\n' .. (not _RELEASE_MODE and debug.traceback() or G.SETTINGS.crashreports and
++			'Since you are opted in to sending crash reports, LocalThunk HQ was sent some useful info about what happened.\nDon\'t worry! There is no identifying or personal information. If you would like\nto opt out, change the \'Crash Report\' setting to Off' or
++			'Crash Reports are set to Off. If you would like to send crash reports, please opt in in the Game settings.\nThese crash reports help us avoid issues like this in the future')
+ 
+ 	local function draw()
+ 		local pos = love.window.toPixels(70)
+@@ -290,7 +418,6 @@
+ 		love.graphics.printf(p, font, pos, pos, love.graphics.getWidth() - pos)
+ 		love.graphics.pop()
+ 		love.graphics.present()
+-
+ 	end
+ 
+ 	while true do
+@@ -304,8 +431,8 @@
+ 			elseif e == "touchpressed" then
+ 				local name = love.window.getTitle()
+ 				if #name == 0 or name == "Untitled" then name = "Game" end
+-				local buttons = {"OK", "Cancel"}
+-				local pressed = love.window.showMessageBox("Quit "..name.."?", "", buttons)
++				local buttons = { "OK", "Cancel" }
++				local pressed = love.window.showMessageBox("Quit " .. name .. "?", "", buttons)
+ 				if pressed == 1 then
+ 					return
+ 				end
+@@ -318,49 +445,49 @@
+ 			love.timer.sleep(0.1)
+ 		end
+ 	end
+-
+ end
+ 
+ function love.resize(w, h)
+-	if w/h < 1 then --Dont allow the screen to be too square, since pop in occurs above and below screen
+-		h = w/1
++	if w / h < 1 then --Dont allow the screen to be too square, since pop in occurs above and below screen
++		h = w / 1
+ 	end
+ 
+ 	--When the window is resized, this code resizes the Canvas, then places the 'room' or gamearea into the middle without streching it
+-	if w/h < G.window_prev.orig_ratio then
+-		G.TILESCALE = G.window_prev.orig_scale*w/G.window_prev.w
++	if w / h < G.window_prev.orig_ratio then
++		G.TILESCALE = G.window_prev.orig_scale * w / G.window_prev.w
+ 	else
+-		G.TILESCALE = G.window_prev.orig_scale*h/G.window_prev.h
++		G.TILESCALE = G.window_prev.orig_scale * h / G.window_prev.h
+ 	end
+ 
+ 	if G.ROOM then
+ 		G.ROOM.T.w = G.TILE_W
+ 		G.ROOM.T.h = G.TILE_H
+ 		G.ROOM_ATTACH.T.w = G.TILE_W
+-		G.ROOM_ATTACH.T.h = G.TILE_H		
++		G.ROOM_ATTACH.T.h = G.TILE_H
+ 
+-		if w/h < G.window_prev.orig_ratio then
++		if w / h < G.window_prev.orig_ratio then
+ 			G.ROOM.T.x = G.ROOM_PADDING_W
+-			G.ROOM.T.y = (h/(G.TILESIZE*G.TILESCALE) - (G.ROOM.T.h+G.ROOM_PADDING_H))/2 + G.ROOM_PADDING_H/2
++			G.ROOM.T.y = (h / (G.TILESIZE * G.TILESCALE) - (G.ROOM.T.h + G.ROOM_PADDING_H)) / 2 + G.ROOM_PADDING_H / 2
+ 		else
+ 			G.ROOM.T.y = G.ROOM_PADDING_H
+-			G.ROOM.T.x = (w/(G.TILESIZE*G.TILESCALE) - (G.ROOM.T.w+G.ROOM_PADDING_W))/2 + G.ROOM_PADDING_W/2
++			G.ROOM.T.x = (w / (G.TILESIZE * G.TILESCALE) - (G.ROOM.T.w + G.ROOM_PADDING_W)) / 2 + G.ROOM_PADDING_W / 2
+ 		end
+ 
+ 		G.ROOM_ORIG = {
+-            x = G.ROOM.T.x,
+-            y = G.ROOM.T.y,
+-            r = G.ROOM.T.r
+-        }
++			x = G.ROOM.T.x,
++			y = G.ROOM.T.y,
++			r = G.ROOM.T.r
++		}
+ 
+ 		if G.buttons then G.buttons:recalculate() end
+ 		if G.HUD then G.HUD:recalculate() end
+ 	end
+ 
+ 	G.WINDOWTRANS = {
+-		x = 0, y = 0,
+-		w = G.TILE_W+2*G.ROOM_PADDING_W, 
+-		h = G.TILE_H+2*G.ROOM_PADDING_H,
++		x = 0,
++		y = 0,
++		w = G.TILE_W + 2 * G.ROOM_PADDING_W,
++		h = G.TILE_H + 2 * G.ROOM_PADDING_H,
+ 		real_window_w = w,
+ 		real_window_h = h
+ 	}
+@@ -371,18 +498,20 @@
+ 		local render_w, render_h = love.window.getDesktopDimensions(G.SETTINGS.WINDOW.selcted_display)
+ 		local unscaled_dims = love.window.getFullscreenModes(G.SETTINGS.WINDOW.selcted_display)[1]
+ 
+-		local DPI_scale = math.floor((0.5*unscaled_dims.width/render_w + 0.5*unscaled_dims.height/render_h)*500 + 0.5)/500
++		local DPI_scale = math.floor((0.5 * unscaled_dims.width / render_w + 0.5 * unscaled_dims.height / render_h) * 500 +
++			0.5) / 500
+ 
+ 		if DPI_scale > 1.1 then
+ 			G.CANV_SCALE = 1.5
+ 
+-			G.AA_CANVAS = love.graphics.newCanvas(G.WINDOWTRANS.real_window_w*G.CANV_SCALE, G.WINDOWTRANS.real_window_h*G.CANV_SCALE, {type = '2d', readable = true})
++			G.AA_CANVAS = love.graphics.newCanvas(G.WINDOWTRANS.real_window_w * G.CANV_SCALE,
++				G.WINDOWTRANS.real_window_h * G.CANV_SCALE, { type = '2d', readable = true })
+ 			G.AA_CANVAS:setFilter('linear', 'linear')
+ 		else
+ 			G.AA_CANVAS = nil
+ 		end
+ 	end
+ 
+-	G.CANVAS = love.graphics.newCanvas(w*G.CANV_SCALE, h*G.CANV_SCALE, {type = '2d', readable = true})
++	G.CANVAS = love.graphics.newCanvas(w * G.CANV_SCALE, h * G.CANV_SCALE, { type = '2d', readable = true })
+ 	G.CANVAS:setFilter('linear', 'linear')
+-end 
++end
