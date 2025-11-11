@@ -2,8 +2,9 @@ Gymasium/
 game/game_files/*
 !game/game_files/server_thread.lua
 !game/game_files/command_handler.lua
-!game/game_files/custom_update.lua
+!game/game_files/custom.lua
 scratch/
 test/
 .venv/
 .vscode/
+original_game_files/
